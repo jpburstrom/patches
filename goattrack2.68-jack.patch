@@ -1,0 +1,215 @@
+diff -ur goattrk/src/bme/bme_snd.c goattrk-jack/src/bme/bme_snd.c
+--- goattrk/src/bme/bme_snd.c	2008-04-01 08:46:06.000000000 +0200
++++ goattrk-jack/src/bme/bme_snd.c	2009-11-08 12:23:26.000000000 +0100
+@@ -7,6 +7,7 @@
+ #include <stdio.h>
+ 
+ #include <SDL/SDL.h>
++#include <jack/jack.h>
+ #include "bme_main.h"
+ #include "bme_cfg.h"
+ #include "bme_win.h"
+@@ -19,15 +20,15 @@
+ void snd_setcustommixer(void (*custommixer)(Sint32 *dest, unsigned samples));
+ static int snd_initmixer(void);
+ static void snd_uninitmixer(void);
+-static void snd_mixdata(Uint8 *dest, unsigned bytes);
+ static void snd_mixchannels(Sint32 *dest, unsigned samples);
+-static void snd_mixer(void *userdata, Uint8 *stream, int len);
++int process(jack_nframes_t nframes, void *arg);
++jack_port_t *audio_output_port;
+ 
+ // Lowlevel mixing functions
+ static void snd_clearclipbuffer(Sint32 *clipbuffer, unsigned clipsamples);
+ static void snd_mixchannel(CHANNEL *chptr, Sint32 *dest, unsigned samples);
+-static void snd_16bit_postprocess(Sint32 *src, Sint16 *dest, unsigned samples);
+-static void snd_8bit_postprocess(Sint32 *src, Uint8 *dest, unsigned samples);
++//static void snd_16bit_postprocess(Sint32 *src, Sint16 *dest, unsigned samples);
++//static void snd_8bit_postprocess(Sint32 *src, Uint8 *dest, unsigned samples);
+ 
+ void (*snd_player)(void) = NULL;
+ CHANNEL *snd_channel = NULL;
+@@ -44,8 +45,14 @@
+ static unsigned snd_previouschannels = 0xffffffff;
+ static int snd_atexit_registered = 0;
+ static Sint32 *snd_clipbuffer = NULL;
+-static SDL_AudioSpec desired;
+-static SDL_AudioSpec obtained;
++
++const float to_32 = 1.0f / 32768.0f; // 16 bit multiplier
++
++
++jack_client_t *jackclient;
++
++// static SDL_AudioSpec desired;
++// static SDL_AudioSpec obtained;
+ 
+ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned channels, int usedirectsound)
+ {
+@@ -55,6 +62,7 @@
+ 
+     if (!snd_atexit_registered)
+     {
++        //FIXME
+         atexit(snd_uninit);
+         snd_atexit_registered = 1;
+     }
+@@ -72,6 +80,7 @@
+         return BME_ERROR;
+     }
+ 
++    /*
+     desired.freq = mixrate;
+     desired.format = AUDIO_U8;
+     if (mixmode & SIXTEENBIT)
+@@ -95,6 +104,7 @@
+ 
+     desired.callback = snd_mixer;
+     desired.userdata = NULL;
++    */
+ 
+     // Init tempo count
+ 
+@@ -133,32 +143,25 @@
+         }
+     }
+ 
+-    SDL_PauseAudio(1);
++    //SDL_PauseAudio(1);
+ 
+-    if (SDL_OpenAudio(&desired, &obtained))
++    if ((jackclient = jack_client_open("goattracker", JackNullOption, NULL)) == 0)
+     {
+         bme_error = BME_OPEN_ERROR;
+         snd_uninit();
+         return BME_ERROR;
+     }
++    audio_output_port = jack_port_register(jackclient, "out", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
++    jack_set_process_callback(jackclient, process, NULL);
++    jack_activate(jackclient);
+     snd_sndinitted = 1;
+ 
+     snd_mixmode = 0;
+     snd_samplesize = 1;
+-    if (obtained.channels == 2)
+-    {
+-        snd_mixmode |= STEREO;
+-        snd_samplesize <<= 1;
+-    }
+-    if ((obtained.format == AUDIO_S16SYS) ||
+-       (obtained.format == AUDIO_S16LSB) ||
+-       (obtained.format == AUDIO_S16MSB))
+-    {
+-        snd_mixmode |= SIXTEENBIT;
+-        snd_samplesize <<= 1;
+-    }
+-    snd_buffersize = obtained.size;
+-    snd_mixrate = obtained.freq;
++    //    snd_mixmode |= SIXTEENBIT;
++    //    snd_samplesize <<= 1;
++    snd_buffersize = jack_get_buffer_size(jackclient);
++    snd_mixrate = jack_get_sample_rate(jackclient);
+ 
+     // Allocate mixer tables
+ 
+@@ -169,7 +172,7 @@
+         return BME_ERROR;
+     }
+ 
+-    SDL_PauseAudio(0);
++    //SDL_PauseAudio(0);
+ 
+     bme_error = BME_OK;
+     return BME_OK;
+@@ -179,7 +182,7 @@
+ {
+     if (snd_sndinitted)
+     {
+-        SDL_CloseAudio();
++        jack_client_close(jackclient);
+         snd_sndinitted = 0;
+     }
+     snd_uninitmixer();
+@@ -216,15 +219,12 @@
+     }
+ }
+ 
+-static void snd_mixer(void *userdata, Uint8 *stream, int len)
++int process(jack_nframes_t nframes, void *arg)
+ {
+-    snd_mixdata(stream, len);
+-}
++    jack_default_audio_sample_t *sample = (jack_default_audio_sample_t *) jack_port_get_buffer(audio_output_port, nframes);
+ 
+-static void snd_mixdata(Uint8 *dest, unsigned bytes)
+-{
+-    unsigned mixsamples = bytes;
+-    unsigned clipsamples = bytes;
++    unsigned mixsamples = nframes;
++    unsigned clipsamples = nframes;
+     Sint32 *clipptr = (Sint32 *)snd_clipbuffer;
+     if (snd_mixmode & STEREO) mixsamples >>= 1;
+     if (snd_mixmode & SIXTEENBIT)
+@@ -276,14 +276,14 @@
+     }
+ 
+     clipptr = (Sint32 *)snd_clipbuffer;
+-    if (snd_mixmode & SIXTEENBIT)
+-    {
+-        snd_16bit_postprocess(clipptr, (Sint16 *)dest, clipsamples);
+-    }
+-    else
+-    {
+-        snd_8bit_postprocess(clipptr, dest, clipsamples);
+-    }
++    jack_nframes_t i;
++    for(i = 0; i < nframes; i++){
++        int s = clipptr[i];
++        if (s > 32768) s = 32768;
++        if (s < -32767) s = -32767;
++		sample[i] = (float) s * to_32;
++	}
++    return 0;
+ }
+ 
+ static void snd_mixchannels(Sint32 *dest, unsigned samples)
+@@ -303,28 +303,6 @@
+     memset(clipbuffer, 0, clipsamples*sizeof(int));
+ }
+ 
+-static void snd_16bit_postprocess(Sint32 *src, Sint16 *dest, unsigned samples)
+-{
+-    while (samples--)
+-    {
+-        int sample = *src++;
+-        if (sample > 32767) sample = 32767;
+-        if (sample < -32768) sample = -32768;
+-        *dest++ = sample;
+-    }
+-}
+-
+-static void snd_8bit_postprocess(Sint32 *src, Uint8 *dest, unsigned samples)
+-{
+-    while (samples--)
+-    {
+-          int sample = *src++;
+-          if (sample > 32767) sample = 32767;
+-          if (sample < -32768) sample = -32768;
+-          *dest++ = (sample >> 8) + 128;
+-    }
+-}
+-
+ static void snd_mixchannel(CHANNEL *chptr, Sint32 *dest, unsigned samples)
+ {
+     if (chptr->voicemode & VM_ON)
+diff -ur goattrk/src/makefile goattrk-jack/src/makefile
+--- goattrk/src/makefile	2008-07-05 11:07:52.000000000 +0200
++++ goattrk-jack/src/makefile	2009-11-08 11:46:04.000000000 +0100
+@@ -5,6 +5,6 @@
+ CFLAGS=`sdl-config --cflags`
+ PREFIX=../linux/
+ SUFFIX=
+-LIBS=`sdl-config --libs`
++LIBS=`sdl-config --libs` -ljack
+ 
+ include makefile.common

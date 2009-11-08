@@ -1,0 +1,115 @@
+diff -rupN mammut-0.60/src/Interface.cpp mammut-0.60-new/src/Interface.cpp
+--- mammut-0.60/src/Interface.cpp	2007-08-11 15:46:35.000000000 +0200
++++ mammut-0.60-new/src/Interface.cpp	2009-10-09 22:34:44.000000000 +0200
+@@ -374,7 +374,7 @@ Interface::Interface (DocumentWindow *ma
+     tabbedComponent->getTabContentComponent(tabbedComponent->getNumTabs()-2)->setEnabled(samps_per_frame>=2?true:false);
+ 
+     tabbedComponent->setEnabled(false);
+-    tabbedComponent->setOutline(Colour(0x00ddf1ee),0);
++    tabbedComponent->setOutline(0);
+     tabbedComponent->setIndent(0);
+ 
+     //->setClickingTogglesState (true);
+@@ -939,15 +939,15 @@ void Interface::comboBoxChanged (ComboBo
+     }
+ }
+ 
+-bool Interface::filesDropped (const StringArray& filenames, int mouseX, int mouseY)
++void Interface::filesDropped (const StringArray& filenames, int mouseX, int mouseY)
+ {
+     //[UserCode_filesDropped] -- Add your code here...
+   loadcomboBox->setText(filenames[0],true);
+   loadFile((char*)filenames[0].toUTF8());
+-  return true;
+     //[/UserCode_filesDropped]
+ }
+ 
++
+ bool Interface::keyPressed (const KeyPress& key)
+ {
+     //[UserCode_keyPressed] -- Add your code here...
+@@ -969,10 +969,10 @@ bool Interface::keyPressed (const KeyPre
+     else
+       playbutton->triggerClick();
+     //MC_play();
+-  }else
+-    return false;
++  }
+ 
+   return true;
++
+   
+     //[/UserCode_keyPressed]
+ }
+diff -rupN mammut-0.60/src/Interface.h mammut-0.60-new/src/Interface.h
+--- mammut-0.60/src/Interface.h	2007-08-11 10:27:13.000000000 +0200
++++ mammut-0.60-new/src/Interface.h	2009-10-09 22:32:30.000000000 +0200
+@@ -65,7 +65,7 @@ public:
+     void buttonClicked (Button* buttonThatWasClicked);
+     void sliderValueChanged (Slider* sliderThatWasMoved);
+     void comboBoxChanged (ComboBox* comboBoxThatHasChanged);
+-    bool filesDropped (const StringArray& filenames, int mouseX, int mouseY);
++    void filesDropped (const StringArray& filenames, int mouseX, int mouseY);
+     bool keyPressed (const KeyPress& key);
+ 
+     // Binary resources:
+diff -rupN mammut-0.60/src/juceplay.cpp mammut-0.60-new/src/juceplay.cpp
+--- mammut-0.60/src/juceplay.cpp	2007-03-04 18:45:03.000000000 +0100
++++ mammut-0.60-new/src/juceplay.cpp	2009-10-09 22:45:48.000000000 +0200
+@@ -38,7 +38,7 @@ I'm sorry about all the non-C++ stuff. I
+ #endif
+ #include <samplerate.h>
+ 
+-#define SRC_QUALITY SRC_SINC_BEST_QUALITY
++#define SRC_QUALITY SRC_SINC_MEDIUM_QUALITY
+ #define JP_MIN(a,b) (((a)<(b))?(a):(b))
+ #define JP_MAX(a,b) (((a)>(b))?(a):(b))
+ 
+@@ -205,7 +205,7 @@ public:
+ 	isinitialized=true;
+ 	
+ 	// start the IO device pulling its data from our callback..
+-	audioDeviceManager.setAudioCallback (this);
++	audioDeviceManager.addAudioCallback (this);
+ 	
+       }
+   }
+@@ -489,7 +489,9 @@ public:
+       printerror("Can not change audio when using jack.");
+       return;
+     }
++    printerror("Can not change audio since the guy who modified the sources is an idiot.");
+ 
++    /*
+     AudioDeviceSelectorComponent audioSettingsComp (audioDeviceManager,
+ 						    0, 0,
+ 						    2, 8,
+@@ -504,12 +506,13 @@ public:
+     if(audioDeviceManager.getCurrentAudioDevice()==NULL && isreadingdata==true){
+       isreadingdata=false;
+     }
++    */
+   }
+   
+-  void audioDeviceAboutToStart (double sampleRate, int numSamplesPerBlock)
++  void audioDeviceAboutToStart (AudioIODevice *device)
+   {
+-    printf("Samplerate set to %f\n",(float)sampleRate);
+-    samplerate=sampleRate;
++    samplerate=device->getSampleRate(0);
++    printf("Samplerate set to %f\n",(float)samplerate);
+     return;
+   }
+   
+diff -rupN mammut-0.60/src/MainAppWindow.cpp mammut-0.60-new/src/MainAppWindow.cpp
+--- mammut-0.60/src/MainAppWindow.cpp	2007-08-11 10:50:10.000000000 +0200
++++ mammut-0.60-new/src/MainAppWindow.cpp	2009-10-09 14:26:15.000000000 +0200
+@@ -50,7 +50,7 @@ MainAppWindow::MainAppWindow(const Strin
+   centreWithSize(855,737);
+ #endif
+ 
+-  LookAndFeel::setDefaultLookAndFeel(new OldSchoolLookAndFeel());
++  //LookAndFeel::setDefaultLookAndFeel(new OldSchoolLookAndFeel());
+   //setLookAndFeel(new OldSchoolLookAndFeel());
+   setResizable (false, false); // resizability is a property of ResizableWindow
+   setVisible (true);
